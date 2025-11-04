@@ -14,7 +14,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT
 
-app.use("/" , itemRoutes)
+app.use("/api/items", itemRoutes)
 connectdb()
 app.listen(PORT , ()=>{
     console.log(`server is running in Port ${PORT}`)
