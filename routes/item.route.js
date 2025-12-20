@@ -7,7 +7,7 @@ const router = express.Router()
 
 
 router.post("/" , authMiddleware ,createItem)
-router.get("/" , authMiddleware ,getAllItems)
+router.get("/"  ,getAllItems)
 router.get("/:itemId" , authMiddleware ,getItemById)
 router.get("/owner/:ownerId", authMiddleware ,getItemsByOwner)
 router.put("/:itemId", authMiddleware ,updateItem)
