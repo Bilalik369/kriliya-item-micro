@@ -1,12 +1,13 @@
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
-import cloudinary from "../config/cloudinary.js";
+import cloudinary from "../lib/cloudinary.js";
 
 const storage = new CloudinaryStorage({
   cloudinary,
   params: {
-    folder: "items",
-    allowed_formats: ["jpg", "png", "jpeg"],
+    folder: "kriliya_items",
+    allowed_formats: ["jpg", "png", "jpeg", "webp"],
+    transformation: [{ width: 1000, height: 1000, crop: "limit" }],
   },
 });
 

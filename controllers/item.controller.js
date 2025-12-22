@@ -3,13 +3,46 @@ import Item from "../models/Item.model.js";
 
 export const createItem = async(req ,res)=>{
     try {
+        console.log("=== CREATE ITEM REQUEST ===");
+        console.log("Body:", req.body);
+        console.log("Files:", req.files);
+        
+        // Handle uploaded images from multer/cloudinary
+        let images = [];
+        if (req.files && req.files.length > 0) {
+            images = req.files.map(file => {
+                console.log("File info:", file);
+                return {
+                    url: file.path,
+                    publicId: file.filename
+                };
+            });
+        }
+        console.log("Processed images:", images);
+
+        // Parse location if it's a string (from FormData)
+        let location = req.body.location;
+        if (typeof location === 'string') {
+            try {
+                location = JSON.parse(location);
+            } catch (e) {
+                location = { city: location };
+            }
+        }
+
         const itemData = {
             ...req.body,
-            ownerId :req.user.userId
+            location: location,
+            ownerId: req.user.userId,
+            images: images
         }
+        
+        console.log("Final itemData:", itemData);
+        
         const item = new Item(itemData)
         await item.save();
-         return res.status(201).json({msg : "Item created successfully"})
+        console.log("Saved item:", item);
+        return res.status(201).json({msg: "Item created successfully", item})
     } catch (error) {
         console.error("create item error " , error)
         return res.status(500).json({msg : "Failed to create item"})
