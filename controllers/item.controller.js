@@ -7,7 +7,7 @@ export const createItem = async(req ,res)=>{
         console.log("Body:", req.body);
         console.log("Files:", req.files);
         
-        // Handle uploaded images from multer/cloudinary
+       
         let images = [];
         if (req.files && req.files.length > 0) {
             images = req.files.map(file => {
@@ -20,7 +20,6 @@ export const createItem = async(req ,res)=>{
         }
         console.log("Processed images:", images);
 
-        // Parse location if it's a string (from FormData)
         let location = req.body.location;
         if (typeof location === 'string') {
             try {
