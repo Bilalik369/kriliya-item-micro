@@ -1,6 +1,12 @@
 import Item from "../models/Item.model.js";
 
 
+const toNum = (v, fallback = undefined) => {
+    if (v === undefined || v === null || v === "") return fallback;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+};
+
 export const createItem = async(req ,res)=>{
     try {
         console.log("=== CREATE ITEM REQUEST ===");
@@ -13,8 +19,8 @@ export const createItem = async(req ,res)=>{
             images = req.files.map(file => {
                 console.log("File info:", file);
                 return {
-                    url: file.path,
-                    publicId: file.filename
+                    url: file.path || file.secure_url,
+                    publicId: file.filename || file.public_id,
                 };
             });
         }
@@ -29,8 +35,16 @@ export const createItem = async(req ,res)=>{
             }
         }
 
+        const b = req.body;
         const itemData = {
-            ...req.body,
+            title: b.title,
+            description: b.description,
+            category: b.category,
+            condition: b.condition || "good",
+            pricePerDay: toNum(b.pricePerDay),
+            pricePerWeek: toNum(b.pricePerWeek),
+            pricePerMonth: toNum(b.pricePerMonth),
+            deposit: toNum(b.deposit, 0) ?? 0,
             location: location,
             ownerId: req.user.userId,
             images: images
@@ -151,24 +165,43 @@ export const getItemsByOwner = async (req, res) => {
 
 export const updateItem = async (req, res) => {
   try {
-    const { itemid } = req.params
-    const updates = req.body
+    const { itemId } = req.params
+    const updates = { ...req.body }
 
-   
-    const item = await Item.findById(itemid)
+    const item = await Item.findById(itemId)
     if (!item) {
       return res.status(404).json({ msg: "Item not found" })
     }
-
 
     if (item.ownerId.toString() !== req.user.userId && req.user.role !== "admin") {
       return res.status(403).json({ msg: "You are not authorized to update this item" })
     }
 
-    Object.keys(updates).forEach((key) => {
-      if (key !== "ownerId" && key !== "_id") {
-        item[key] = updates[key]
+    if (typeof updates.location === "string") {
+      try {
+        updates.location = JSON.parse(updates.location)
+      } catch {
+        /* keep string, model may reject */
       }
+    }
+
+    if (updates.pricePerDay !== undefined) updates.pricePerDay = toNum(updates.pricePerDay)
+    if (updates.pricePerWeek !== undefined) updates.pricePerWeek = toNum(updates.pricePerWeek)
+    if (updates.pricePerMonth !== undefined) updates.pricePerMonth = toNum(updates.pricePerMonth)
+    if (updates.deposit !== undefined) updates.deposit = toNum(updates.deposit, 0) ?? 0
+
+    if (req.files && req.files.length > 0) {
+      const newImages = req.files.map((file) => ({
+        url: file.path || file.secure_url,
+        publicId: file.filename || file.public_id,
+      }))
+      updates.images = [...(item.images || []), ...newImages]
+    }
+
+    Object.keys(updates).forEach((key) => {
+      if (key === "ownerId" || key === "_id") return
+      if (updates[key] === undefined) return
+      item[key] = updates[key]
     })
 
     await item.save()
