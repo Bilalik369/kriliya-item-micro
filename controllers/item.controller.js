@@ -1,4 +1,5 @@
 import Item from "../models/Item.model.js";
+import axios from "axios";
 
 
 const toNum = (v, fallback = undefined) => {
@@ -47,7 +48,9 @@ export const createItem = async(req ,res)=>{
             deposit: toNum(b.deposit, 0) ?? 0,
             location: location,
             ownerId: req.user.userId,
-            images: images
+            images: images,
+            approvalStatus: "pending",
+            isActive: false,
         }
         
         console.log("Final itemData:", itemData);
@@ -55,7 +58,27 @@ export const createItem = async(req ,res)=>{
         const item = new Item(itemData)
         await item.save();
         console.log("Saved item:", item);
-        return res.status(201).json({msg: "Item created successfully", item})
+
+        if (process.env.NOTIFICATION_SERVICE_URL && process.env.ADMIN_EMAIL) {
+            axios
+                .post(
+                    `${process.env.NOTIFICATION_SERVICE_URL}/item-pending`,
+                    {
+                        adminEmail: process.env.ADMIN_EMAIL,
+                        itemTitle: item.title,
+                        itemId: item._id,
+                        ownerEmail: req.user?.email || "unknown",
+                    },
+                    { timeout: 8000 }
+                )
+                .catch((err) => {
+                    console.error("Pending item notification error:", err.message);
+                });
+        }
+        return res.status(201).json({
+            msg: "Item created and sent for admin approval",
+            item,
+        })
     } catch (error) {
         console.error("create item error " , error)
         return res.status(500).json({msg : "Failed to create item"})
@@ -77,7 +100,10 @@ export const getAllItems = async(req , res)=>{
       order = "desc",
     } = req.query
 
-    const filter = {isActive : true}
+    const filter = {
+      isActive: true,
+      $or: [{ approvalStatus: "approved" }, { approvalStatus: { $exists: false } }],
+    }
     if(category) filter.category = category
     if (city) filter["location.city"] = new RegExp(city, "i")
      if (availability) filter.availability = availability
@@ -122,6 +148,15 @@ export const getItemById = async(req , res)=>{
 
     if (!item) {
       return res.status(404).json({msg : "Item not found"})
+    }
+    const requesterId = req.user?.userId;
+    const requesterRole = req.user?.role;
+    const canViewUnapproved =
+      requesterRole === "admin" || String(item.ownerId) === String(requesterId);
+
+    const status = item.approvalStatus || "approved"
+    if (status !== "approved" && !canViewUnapproved) {
+      return res.status(403).json({ msg: "Item is pending admin approval" });
     }
      await item.incrementViews()
      return res.status(200).json({ data:item})
@@ -204,11 +239,20 @@ export const updateItem = async (req, res) => {
       item[key] = updates[key]
     })
 
+    // Owner edits go back to moderation queue; admin edits stay approved.
+    if (req.user.role !== "admin") {
+      item.approvalStatus = "pending"
+      item.isActive = false
+      item.approvedBy = null
+      item.approvedAt = null
+      item.rejectionReason = ""
+    }
+
     await item.save()
 
     return res.status(200).json({
       item,
-      msg: "Item updated successfully",
+      msg: req.user.role === "admin" ? "Item updated successfully" : "Item updated and sent for admin approval",
     })
   } catch (error) {
     console.error("Update item error:", error)
@@ -263,6 +307,11 @@ export const updateAvailability = async (req, res) => {
     }
 
     
+    const status = item.approvalStatus || "approved"
+    if (status !== "approved") {
+      return res.status(400).json({ msg: "Approve item first before changing availability" });
+    }
+
     item.availability = availability;
     await item.save();
 
@@ -275,4 +324,55 @@ export const updateAvailability = async (req, res) => {
     return res.status(500).json({ msg: "Failed to update availability" });
   }
 };
+
+export const getPendingItemsForAdmin = async (req, res) => {
+  try {
+    const items = await Item.find({ approvalStatus: "pending" }).sort({ createdAt: -1 }).limit(200)
+    return res.status(200).json({ items })
+  } catch (error) {
+    console.error("Get pending items error:", error)
+    return res.status(500).json({ msg: "Failed to fetch pending items" })
+  }
+}
+
+export const approveItemByAdmin = async (req, res) => {
+  try {
+    const { itemId } = req.params
+    const item = await Item.findById(itemId)
+    if (!item) return res.status(404).json({ msg: "Item not found" })
+
+    item.approvalStatus = "approved"
+    item.isActive = true
+    item.approvedBy = req.user.userId
+    item.approvedAt = new Date()
+    item.rejectionReason = ""
+    await item.save()
+
+    return res.status(200).json({ msg: "Item approved", item })
+  } catch (error) {
+    console.error("Approve item error:", error)
+    return res.status(500).json({ msg: "Failed to approve item" })
+  }
+}
+
+export const rejectItemByAdmin = async (req, res) => {
+  try {
+    const { itemId } = req.params
+    const { reason = "" } = req.body || {}
+    const item = await Item.findById(itemId)
+    if (!item) return res.status(404).json({ msg: "Item not found" })
+
+    item.approvalStatus = "rejected"
+    item.isActive = false
+    item.approvedBy = req.user.userId
+    item.approvedAt = new Date()
+    item.rejectionReason = String(reason || "").trim()
+    await item.save()
+
+    return res.status(200).json({ msg: "Item rejected", item })
+  } catch (error) {
+    console.error("Reject item error:", error)
+    return res.status(500).json({ msg: "Failed to reject item" })
+  }
+}
 

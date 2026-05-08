@@ -108,7 +108,27 @@ const itemSchema = new mongoose.Schema(
     rules: [String],
     isActive: {
       type: Boolean,
-      default: true,
+      default: false,
+    },
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+      index: true,
+    },
+    approvedBy: {
+      type: String,
+      default: null,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: [300, "Rejection reason cannot exceed 300 characters"],
     },
     views: {
       type: Number,
