@@ -68,6 +68,7 @@ export const createItem = async(req ,res)=>{
                         itemTitle: item.title,
                         itemId: item._id,
                         ownerEmail: req.user?.email || "unknown",
+                        ownerName: req.user?.userName || req.user?.email || "Unknown user",
                     },
                     { timeout: 8000 }
                 )
