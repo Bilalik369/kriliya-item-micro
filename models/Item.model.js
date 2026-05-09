@@ -8,6 +8,12 @@ const itemSchema = new mongoose.Schema(
       type: String,
       required: [true, "Owner ID is required"],
     },
+    /** Snapshot for emails (approve/reject); older items may resolve via auth service */
+    ownerEmail: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     title: {
       type: String,
       required: [true, "Title is required"],

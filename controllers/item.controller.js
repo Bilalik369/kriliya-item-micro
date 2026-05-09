@@ -1,6 +1,45 @@
 import Item from "../models/Item.model.js";
 import axios from "axios";
 
+async function resolveOwnerEmail(item) {
+    const direct = item.ownerEmail && String(item.ownerEmail).trim();
+    if (direct) return direct;
+
+    const base = process.env.AUTH_SERVICE_URL?.replace(/\/+$/, "");
+    const token = process.env.SERVICE_TOKEN;
+    if (!base || !token) return null;
+
+    try {
+        const res = await axios.get(`${base}/api/auth/service/users/${item.ownerId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 8000,
+        });
+        const profile = res.data?.data;
+        return profile?.email || null;
+    } catch (err) {
+        console.error("resolveOwnerEmail:", err.message);
+        return null;
+    }
+}
+
+function notifyOwnerItemDecision({ ownerEmail, itemTitle, decision, rejectionReason = "" }) {
+    if (!process.env.NOTIFICATION_SERVICE_URL || !ownerEmail) return;
+
+    const path = decision === "approved" ? "/item-approved" : "/item-rejected";
+    axios
+        .post(
+            `${process.env.NOTIFICATION_SERVICE_URL.replace(/\/+$/, "")}${path}`,
+            {
+                ownerEmail,
+                itemTitle,
+                rejectionReason: String(rejectionReason || "").trim(),
+            },
+            { timeout: 8000 },
+        )
+        .catch((err) => {
+            console.error(`Item ${decision} notification error:`, err.message);
+        });
+}
 
 const toNum = (v, fallback = undefined) => {
     if (v === undefined || v === null || v === "") return fallback;
@@ -48,6 +87,7 @@ export const createItem = async(req ,res)=>{
             deposit: toNum(b.deposit, 0) ?? 0,
             location: location,
             ownerId: req.user.userId,
+            ownerEmail: req.user?.email || "",
             images: images,
             approvalStatus: "pending",
             isActive: false,
@@ -62,7 +102,7 @@ export const createItem = async(req ,res)=>{
         if (process.env.NOTIFICATION_SERVICE_URL && process.env.ADMIN_EMAIL) {
             axios
                 .post(
-                    `${process.env.NOTIFICATION_SERVICE_URL}/item-pending`,
+                    `${process.env.NOTIFICATION_SERVICE_URL.replace(/\/+$/, "")}/item-pending`,
                     {
                         adminEmail: process.env.ADMIN_EMAIL,
                         itemTitle: item.title,
@@ -235,7 +275,7 @@ export const updateItem = async (req, res) => {
     }
 
     Object.keys(updates).forEach((key) => {
-      if (key === "ownerId" || key === "_id") return
+      if (key === "ownerId" || key === "_id" || key === "ownerEmail" || key === "approvalStatus") return
       if (updates[key] === undefined) return
       item[key] = updates[key]
     })
@@ -247,9 +287,28 @@ export const updateItem = async (req, res) => {
       item.approvedBy = null
       item.approvedAt = null
       item.rejectionReason = ""
+      if (!item.ownerEmail && req.user?.email) {
+        item.ownerEmail = req.user.email
+      }
     }
 
     await item.save()
+
+    if (req.user.role !== "admin" && item.approvalStatus === "pending" && process.env.NOTIFICATION_SERVICE_URL && process.env.ADMIN_EMAIL) {
+      axios
+        .post(
+          `${process.env.NOTIFICATION_SERVICE_URL.replace(/\/+$/, "")}/item-pending`,
+          {
+            adminEmail: process.env.ADMIN_EMAIL,
+            itemTitle: item.title,
+            itemId: item._id,
+            ownerEmail: req.user?.email || item.ownerEmail || "unknown",
+            ownerName: req.user?.userName || req.user?.email || "Unknown user",
+          },
+          { timeout: 8000 },
+        )
+        .catch((err) => console.error("Pending item notification (update):", err.message))
+    }
 
     return res.status(200).json({
       item,
@@ -349,6 +408,13 @@ export const approveItemByAdmin = async (req, res) => {
     item.rejectionReason = ""
     await item.save()
 
+    const ownerEmail = await resolveOwnerEmail(item)
+    notifyOwnerItemDecision({
+        ownerEmail,
+        itemTitle: item.title,
+        decision: "approved",
+    })
+
     return res.status(200).json({ msg: "Item approved", item })
   } catch (error) {
     console.error("Approve item error:", error)
@@ -369,6 +435,14 @@ export const rejectItemByAdmin = async (req, res) => {
     item.approvedAt = new Date()
     item.rejectionReason = String(reason || "").trim()
     await item.save()
+
+    const ownerEmail = await resolveOwnerEmail(item)
+    notifyOwnerItemDecision({
+        ownerEmail,
+        itemTitle: item.title,
+        decision: "rejected",
+        rejectionReason: item.rejectionReason,
+    })
 
     return res.status(200).json({ msg: "Item rejected", item })
   } catch (error) {
